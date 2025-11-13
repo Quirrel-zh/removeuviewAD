@@ -11,8 +11,8 @@
 ### 前置要求
 
 - 安装用户脚本管理器：
-  - [Tampermonkey](https://www.tampermonkey.net/) (推荐)
-  - [ScriptCat]([https://violentmonkey.github.io/](https://docs.scriptcat.org/))
+  - [Tampermonkey](https://www.tampermonkey.net/)
+  - [ScriptCat](https://docs.scriptcat.org/)
   
 
 ### 安装步骤
