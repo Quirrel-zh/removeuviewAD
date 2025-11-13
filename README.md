@@ -87,4 +87,6 @@ removeuviewAD/
 
 ---
 
-**⭐ 如果这个项目对你有帮助，请给个 Star！**
+**⭐ 如果这个项目对你有帮助，请给个 Star！或一杯咖啡！**
+![alt text](images/alipay.jpg)
+![alt text](images/wechat.jpg)
