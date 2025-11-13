@@ -12,8 +12,8 @@
 
 - 安装用户脚本管理器：
   - [Tampermonkey](https://www.tampermonkey.net/) (推荐)
-  - [Violentmonkey](https://violentmonkey.github.io/)
-  - [Greasemonkey](https://www.greasespot.net/)
+  - [ScriptCat]([https://violentmonkey.github.io/](https://docs.scriptcat.org/))
+  
 
 ### 安装步骤
 
