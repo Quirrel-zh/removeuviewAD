@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         屏蔽广告弹窗
+// @name         屏蔽uview-plus广告弹窗
 // @namespace    https://www.f2iclo.cn/
-// @version      1.0.0
+// @version      1.0.1
 // @description  屏蔽网页广告弹窗并绕过检测机制
 // @author       Quirrel-zh
 // @supportURL   https://github.com/Quirrel-zh/removeuviewAD/issues
@@ -9,6 +9,8 @@
 // @match        https://uview-plus.jiangruyi.com/*
 // @grant        none
 // @run-at       document-start
+// @license      MIT
+// @tag          uview-plus,广告,屏蔽,弹窗
 // ==/UserScript==
 
 (function () {
