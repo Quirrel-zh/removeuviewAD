@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         屏蔽uview-plus广告弹窗
 // @namespace    https://www.f2iclo.cn/
-// @version      1.0.1
+// @version      1.0.2
 // @description  屏蔽网页广告弹窗并绕过检测机制
 // @author       Quirrel-zh
 // @supportURL   https://github.com/Quirrel-zh/removeuviewAD/issues
@@ -16,53 +16,62 @@
 (function () {
   'use strict';
 
-  // 1. 立即设置 localStorage 来绕过检查（最早执行）
-  if (window.localStorage) {
-    const expireTime = Math.floor(Date.now() / 1000) + 43200;
-    localStorage.setItem('adExpire2', expireTime.toString());
+  const AD_FREE_SECONDS = 43200;
+  const AD_API_PATTERN = 'uiadmin.net/api/v1/wxapp/ad';
+
+  function createAdBypassPayload() {
+    const rounded = 60000 * Math.floor(Date.now() / 60000);
+    return {
+      code: 200,
+      data: {
+        ['yoip' + rounded]: true
+      }
+    };
   }
+
+  // 1. 立即设置 localStorage 绕过 checkVip（adExpire3 为新版本 key）
+  function setAdExpire() {
+    if (!window.localStorage) return;
+    const expireTime = Math.floor(Date.now() / 1000) + AD_FREE_SECONDS;
+    const expireStr = expireTime.toString();
+    localStorage.setItem('adExpire3', expireStr);
+    localStorage.setItem('adExpire2', expireStr);
+  }
+
+  setAdExpire();
 
   // 2. 阻止页面被隐藏 - 拦截 style.opacity 的设置
   function protectDocumentOpacity() {
-    // 等待 DOM 加载
     if (document.documentElement) {
       const htmlElement = document.documentElement;
-      const originalStyleSetter = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'style')?.set;
-      
-      // 拦截 style.opacity 的设置
+
       Object.defineProperty(htmlElement.style, 'opacity', {
-        set: function(value) {
-          if (value === '0' || value === 0 || value === '0') {
-            // 阻止设置为 0
+        set: function (value) {
+          if (value === '0' || value === 0) {
             return;
           }
-          // 使用 CSSStyleDeclaration 的原生方法
           this.setProperty('opacity', value);
         },
-        get: function() {
+        get: function () {
           const value = this.getPropertyValue('opacity');
           return value || '1';
         },
         configurable: true
       });
     } else {
-      // 如果 documentElement 还不存在，延迟执行
       setTimeout(protectDocumentOpacity, 0);
     }
   }
-  
-  // 立即尝试保护
+
   protectDocumentOpacity();
-  
-  // 监听 DOM 加载完成
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', protectDocumentOpacity);
   }
 
-  // 3. 拦截 alert 函数，防止检测机制弹出警告
+  // 3. 拦截 alert，防止检测机制弹出警告
   const originalAlert = window.alert;
-  window.alert = function() {
-    // 只拦截包含特定关键词的 alert
+  window.alert = function () {
     const args = Array.from(arguments);
     if (args.some(arg => typeof arg === 'string' && arg.includes('广告屏蔽器'))) {
       return;
@@ -70,24 +79,30 @@
     return originalAlert.apply(this, arguments);
   };
 
-  // 4. 阻止检测机制中的关键检查
+  // 4. 阻止旧版 MutationObserver 检测（兼容 adVip / adVip2）
   function blockDetection() {
-    // 阻止 MutationObserver 检测
     const OriginalMutationObserver = window.MutationObserver;
-    window.MutationObserver = function(callback) {
-      const wrappedCallback = function(mutations, observer) {
-        // 过滤掉对弹窗元素的检测
+    window.MutationObserver = function (callback) {
+      const wrappedCallback = function (mutations, observer) {
         const filteredMutations = mutations.filter(mutation => {
           if (mutation.type === 'childList') {
             const addedNodes = Array.from(mutation.addedNodes);
             return !addedNodes.some(node => {
-              if (node.nodeType === 1) { // Element node
-                return node.id === 'pleasePrNotCrack' || 
-                       node.classList?.contains('v-modal') ||
-                       node.classList?.contains('el-dialog__wrapper');
-              }
-              return false;
+              if (node.nodeType !== 1) return false;
+              return node.id === 'pleasePrNotCrack' ||
+                node.id?.startsWith('plsPrNotCrack') ||
+                node.classList?.contains('v-modal') ||
+                node.classList?.contains('el-dialog__wrapper') ||
+                node.classList?.contains('uv-ad-shell') ||
+                node.classList?.contains('uv-ad-panel');
             });
+          }
+          if (mutation.type === 'attributes') {
+            const target = mutation.target;
+            if (target?.classList?.contains('uv-ad-shell') ||
+              target?.classList?.contains('uv-ad-panel')) {
+              return false;
+            }
           }
           return true;
         });
@@ -97,26 +112,25 @@
       };
       return new OriginalMutationObserver(wrappedCallback);
     };
+    window.MutationObserver.prototype = OriginalMutationObserver.prototype;
   }
 
-  // 5. 移除或隐藏弹窗元素
-  function removeAdDialog() {
+  // 5. 移除旧版弹窗元素（新版 uv-ad-shell 依赖 localStorage 绕过，直接移除会触发自愈）
+  const LEGACY_AD_SELECTORS = '.v-modal, .el-dialog__wrapper, #pleasePrNotCrack, [id^="plsPrNotCrack"]';
+
+  function removeLegacyAdDialog() {
     if (!document.body) {
-      // 如果 body 还不存在，等待 DOM 加载
       if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', removeAdDialog);
+        document.addEventListener('DOMContentLoaded', removeLegacyAdDialog);
       } else {
-        setTimeout(removeAdDialog, 100);
+        setTimeout(removeLegacyAdDialog, 100);
       }
       return;
     }
 
-    // 使用 MutationObserver 监听弹窗出现并立即移除
-    const observer = new MutationObserver(function(mutations) {
-      // 移除所有弹窗元素（除了假元素）
-      document.querySelectorAll('.v-modal, .el-dialog__wrapper, #pleasePrNotCrack').forEach(el => {
+    const observer = new MutationObserver(function () {
+      document.querySelectorAll(LEGACY_AD_SELECTORS).forEach(el => {
         const rect = el.getBoundingClientRect();
-        // 如果元素不在屏幕外很远的地方（假元素在 -9999px），则移除
         if (rect.left > -5000) {
           el.remove();
         }
@@ -129,117 +143,113 @@
     });
   }
 
-  // 6. 阻止相关的 API 请求（可选，如果需要完全阻止）
+  // 6. 拦截广告 API，返回免广告会员响应
+  function isAdApiUrl(url) {
+    return typeof url === 'string' && url.includes(AD_API_PATTERN);
+  }
+
   function blockAdApi() {
     const originalFetch = window.fetch;
-    window.fetch = function(...args) {
+    window.fetch = function (...args) {
       const url = args[0];
-      if (typeof url === 'string' && url.includes('uiadmin.net/api/v1/wxapp/ad')) {
-        // 阻止广告相关的 API 请求
+      if (isAdApiUrl(typeof url === 'string' ? url : url?.url)) {
+        const payload = createAdBypassPayload();
+        setAdExpire();
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ code: 200, data: { isVip: true } }),
-          text: () => Promise.resolve(JSON.stringify({ code: 200, data: { isVip: true } }))
+          json: () => Promise.resolve(payload),
+          text: () => Promise.resolve(JSON.stringify(payload))
         });
       }
       return originalFetch.apply(this, args);
     };
 
-    // 拦截 axios 请求（如果使用 axios）
-    if (window.axios) {
-      const originalPost = window.axios.post;
-      window.axios.post = function(...args) {
-        const url = args[0];
-        if (typeof url === 'string' && url.includes('uiadmin.net/api/v1/wxapp/ad')) {
-          return Promise.resolve({
-            data: { code: 200, data: { isVip: true } }
-          });
+    function patchAxios() {
+      if (!window.axios || window.axios._adPatched) return;
+      const originalPost = window.axios.post.bind(window.axios);
+      window.axios.post = function (url, ...args) {
+        if (isAdApiUrl(url)) {
+          setAdExpire();
+          return Promise.resolve({ data: createAdBypassPayload() });
         }
-        return originalPost.apply(this, args);
+        return originalPost(url, ...args);
       };
+      window.axios._adPatched = true;
     }
+
+    patchAxios();
+    const axiosPatchTimer = setInterval(() => {
+      patchAxios();
+      if (window.axios?._adPatched) {
+        clearInterval(axiosPatchTimer);
+      }
+    }, 50);
   }
 
-  // 7. 阻止定时器检测
+  // 7. 阻止守卫定时检测（checkDisplay / checkVip）
   function blockIntervalCheck() {
     const originalSetInterval = window.setInterval;
-    window.setInterval = function(callback, delay) {
-      // 如果回调函数包含检测逻辑，则阻止执行
+    window.setInterval = function (callback, delay) {
       const callbackStr = callback.toString();
-      if (callbackStr.includes('checkDisplay') || 
-          callbackStr.includes('checkVip') ||
-          callbackStr.includes('pleasePrNotCrack')) {
-        return null; // 返回 null 而不是定时器 ID
+      if (callbackStr.includes('checkDisplay') ||
+        callbackStr.includes('checkVip') ||
+        callbackStr.includes('pleasePrNotCrack') ||
+        callbackStr.includes('restoreGuardNodes') ||
+        callbackStr.includes('applyGuardStyles')) {
+        return null;
       }
       return originalSetInterval.apply(this, arguments);
     };
   }
 
-  // 8. 创建假的弹窗元素来欺骗检测机制（如果检测机制需要元素存在）
+  // 8. 创建旧版假弹窗元素（兼容 adVip / adVip2 检测）
   function createFakeDialog() {
     if (!document.body) {
       setTimeout(createFakeDialog, 100);
       return;
     }
 
-    // 如果元素不存在，创建一个隐藏的假元素
     if (!document.getElementById('pleasePrNotCrack')) {
       const fakeDialog = document.createElement('div');
       fakeDialog.id = 'pleasePrNotCrack';
-      fakeDialog.style.display = 'none';
-      fakeDialog.style.visibility = 'hidden';
-      fakeDialog.style.opacity = '0';
-      fakeDialog.style.position = 'absolute';
-      fakeDialog.style.left = '-9999px';
-      fakeDialog.style.zIndex = '-9999';
+      fakeDialog.style.cssText = 'display:none;visibility:hidden;opacity:0;position:absolute;left:-9999px;z-index:-9999';
       document.body.appendChild(fakeDialog);
     }
 
-    // 确保 v-modal 和 el-dialog__wrapper 也存在但隐藏
     if (!document.querySelector('.v-modal')) {
       const fakeModal = document.createElement('div');
       fakeModal.className = 'v-modal';
-      fakeModal.style.display = 'none';
-      fakeModal.style.visibility = 'visible'; // 保持 visible 但 display 为 none
-      fakeModal.style.position = 'absolute';
-      fakeModal.style.left = '-9999px';
-      fakeModal.style.zIndex = '2000'; // 正常的 z-index
-      fakeModal.style.background = 'rgba(0, 0, 0, 0.5)'; // 正常的背景色
+      fakeModal.style.cssText = 'display:none;visibility:visible;position:absolute;left:-9999px;z-index:2000;background:rgba(0,0,0,0.5)';
       document.body.appendChild(fakeModal);
     }
 
     if (!document.querySelector('.el-dialog__wrapper')) {
       const fakeWrapper = document.createElement('div');
       fakeWrapper.className = 'el-dialog__wrapper';
-      fakeWrapper.style.display = 'none';
-      fakeWrapper.style.visibility = 'visible';
-      fakeWrapper.style.position = 'absolute';
-      fakeWrapper.style.left = '-9999px';
-      fakeWrapper.style.zIndex = '2001';
+      fakeWrapper.style.cssText = 'display:none;visibility:visible;position:absolute;left:-9999px;z-index:2001';
       document.body.appendChild(fakeWrapper);
     }
   }
 
-  // 执行所有防护措施
   function initProtection() {
     blockDetection();
-    removeAdDialog();
+    removeLegacyAdDialog();
     blockAdApi();
     blockIntervalCheck();
     createFakeDialog();
-    
-    // 定期清理真实弹窗，但保留假元素
+
+    // 定期续期 adExpire3，并清理旧版弹窗
     setInterval(() => {
+      setAdExpire();
       if (document.body) {
-        document.querySelectorAll('.v-modal, .el-dialog__wrapper, #pleasePrNotCrack').forEach(el => {
+        document.querySelectorAll(LEGACY_AD_SELECTORS).forEach(el => {
           const rect = el.getBoundingClientRect();
-          // 如果元素不在屏幕外很远的地方（假元素在 -9999px），则移除
           if (rect.left > -5000) {
             el.remove();
           }
         });
       }
-    }, 1000);
+    }, 3600000);
   }
 
   if (document.readyState === 'loading') {
